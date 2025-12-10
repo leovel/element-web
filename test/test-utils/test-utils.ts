@@ -9,6 +9,7 @@ Please see LICENSE files in the repository root for full details.
 import EventEmitter from "events";
 import { mocked, type MockedObject } from "jest-mock";
 import {
+    type EventTimeline,
     MatrixEvent,
     type Room,
     type User,
@@ -16,7 +17,6 @@ import {
     type IEvent,
     type RoomMember,
     type MatrixClient,
-    type EventTimeline,
     type RoomState,
     EventType,
     type IEventRelation,
@@ -30,6 +30,7 @@ import {
     JoinRule,
     type OidcClientConfig,
     type GroupCall,
+    HistoryVisibility,
 } from "matrix-js-sdk/src/matrix";
 import { KnownMembership } from "matrix-js-sdk/src/types";
 import { normalize } from "matrix-js-sdk/src/utils";
@@ -195,6 +196,7 @@ export function createTestClient(): MatrixClient {
                 content: {},
             });
         }),
+        getAccountDataFromServer: jest.fn(),
         mxcUrlToHttp: jest.fn().mockImplementation((mxc: string) => `http://this.is.a.url/${mxc.substring(6)}`),
         setAccountData: jest.fn(),
         deleteAccountData: jest.fn(),
@@ -204,6 +206,7 @@ export function createTestClient(): MatrixClient {
         sendTyping: jest.fn().mockResolvedValue({}),
         sendMessage: jest.fn().mockResolvedValue({}),
         sendStateEvent: jest.fn().mockResolvedValue(undefined),
+        sendRtcDecline: jest.fn().mockResolvedValue(undefined),
         getSyncState: jest.fn().mockReturnValue("SYNCING"),
         generateClientSecret: () => "t35tcl1Ent5ECr3T",
         isGuest: jest.fn().mockReturnValue(false),
@@ -275,7 +278,9 @@ export function createTestClient(): MatrixClient {
 
         _unstable_sendDelayedEvent: jest.fn(),
         _unstable_sendDelayedStateEvent: jest.fn(),
-        _unstable_updateDelayedEvent: jest.fn(),
+        _unstable_cancelScheduledDelayedEvent: jest.fn(),
+        _unstable_restartScheduledDelayedEvent: jest.fn(),
+        _unstable_sendScheduledDelayedEvent: jest.fn(),
 
         searchUserDirectory: jest.fn().mockResolvedValue({ limited: false, results: [] }),
         setDeviceVerified: jest.fn(),
@@ -623,6 +628,7 @@ export function mkStubRoom(
         createThreadsTimelineSets: jest.fn().mockReturnValue(new Promise(() => {})),
         currentState: {
             getStateEvents: jest.fn((_type, key) => (key === undefined ? [] : null)),
+            getHistoryVisibility: jest.fn().mockReturnValue(HistoryVisibility.Joined),
             getMember: jest.fn(),
             mayClientSendStateEvent: jest.fn().mockReturnValue(true),
             maySendStateEvent: jest.fn().mockReturnValue(true),
@@ -649,6 +655,7 @@ export function mkStubRoom(
         getJoinedMembers: jest.fn().mockReturnValue([]),
         getLiveTimeline: jest.fn().mockReturnValue(stubTimeline),
         getLastLiveEvent: jest.fn().mockReturnValue(undefined),
+        getLastActiveTimestamp: jest.fn().mockReturnValue(1183140000),
         getMember: jest.fn().mockReturnValue({
             userId: "@member:domain.bla",
             name: "Member",

@@ -11,6 +11,7 @@ import { fireEvent, render, screen, waitFor, within } from "jest-matrix-react";
 import { EventType, GuestAccess, HistoryVisibility, JoinRule, MatrixEvent, Room } from "matrix-js-sdk/src/matrix";
 import { logger } from "matrix-js-sdk/src/logger";
 import { mocked } from "jest-mock";
+import { type RoomPowerLevelsEventContent } from "matrix-js-sdk/src/types";
 
 import SecurityRoomSettingsTab from "../../../../../../../src/components/views/settings/tabs/room/SecurityRoomSettingsTab";
 import MatrixClientContext from "../../../../../../../src/contexts/MatrixClientContext";
@@ -123,6 +124,88 @@ describe("<SecurityRoomSettingsTab />", () => {
             );
         });
 
+        it("handles changing room to private with world_readable history visiblity", async () => {
+            const room = new Room(roomId, client, userId);
+            setRoomStateEvents(room, JoinRule.Public, undefined, HistoryVisibility.WorldReadable);
+
+            getComponent(room);
+
+            fireEvent.click(screen.getByLabelText("Private (invite only)"));
+
+            await flushPromises();
+
+            expect(client.sendStateEvent).toHaveBeenCalledWith(
+                room.roomId,
+                EventType.RoomHistoryVisibility,
+                {
+                    history_visibility: HistoryVisibility.Shared,
+                },
+                "",
+            );
+            expect(client.sendStateEvent).toHaveBeenCalledWith(
+                room.roomId,
+                EventType.RoomJoinRules,
+                {
+                    join_rule: JoinRule.Invite,
+                },
+                "",
+            );
+        });
+
+        it("doesn't change room to private when user lacks permissions for history visibility", async () => {
+            const room = new Room(roomId, client, userId);
+            setRoomStateEvents(room, JoinRule.Public, undefined, HistoryVisibility.WorldReadable);
+            room.currentState.setStateEvents([
+                new MatrixEvent({
+                    type: EventType.RoomPowerLevels,
+                    content: {
+                        users: { [userId]: 50 },
+                        state_default: 50,
+                        events: {
+                            [EventType.RoomJoinRules]: 50,
+                            [EventType.RoomHistoryVisibility]: 100,
+                        },
+                    } as RoomPowerLevelsEventContent,
+                    sender: userId,
+                    state_key: "",
+                    room_id: room.roomId,
+                }),
+            ]);
+
+            getComponent(room);
+            fireEvent.click(screen.getByLabelText("Private (invite only)"));
+            await flushPromises();
+            // Ensure we don't make any changes
+            expect(client.sendStateEvent).not.toHaveBeenCalled();
+        });
+
+        it("doesn't change room to private when history visibility change fails", async () => {
+            client.sendStateEvent.mockRejectedValue("Failed");
+            const room = new Room(roomId, client, userId);
+            setRoomStateEvents(room, JoinRule.Public, undefined, HistoryVisibility.WorldReadable);
+
+            getComponent(room);
+            fireEvent.click(screen.getByLabelText("Private (invite only)"));
+            await flushPromises();
+            expect(client.sendStateEvent).toHaveBeenCalledWith(
+                room.roomId,
+                EventType.RoomHistoryVisibility,
+                {
+                    history_visibility: HistoryVisibility.Shared,
+                },
+                "",
+            );
+            // Ensure we don't make any changes
+            expect(client.sendStateEvent).not.toHaveBeenCalledWith(
+                room.roomId,
+                EventType.RoomJoinRules,
+                {
+                    join_rule: JoinRule.Invite,
+                },
+                "",
+            );
+        });
+
         it("handles error when updating join rule fails", async () => {
             const room = new Room(roomId, client, userId);
             client.sendStateEvent.mockRejectedValue("oups");
@@ -169,7 +252,7 @@ describe("<SecurityRoomSettingsTab />", () => {
 
             fireEvent.click(screen.getByText("Show advanced"));
 
-            expect(screen.getByLabelText("Enable guest access").getAttribute("aria-checked")).toBe("false");
+            expect(screen.getByLabelText("Enable guest access")).not.toBeChecked();
         });
 
         it("updates guest access on toggle", () => {
@@ -181,7 +264,7 @@ describe("<SecurityRoomSettingsTab />", () => {
             fireEvent.click(screen.getByLabelText("Enable guest access"));
 
             // toggle set immediately
-            expect(screen.getByLabelText("Enable guest access").getAttribute("aria-checked")).toBe("true");
+            expect(screen.getByLabelText("Enable guest access")).toBeChecked();
 
             expect(client.sendStateEvent).toHaveBeenCalledWith(
                 room.roomId,
@@ -202,14 +285,14 @@ describe("<SecurityRoomSettingsTab />", () => {
             fireEvent.click(screen.getByLabelText("Enable guest access"));
 
             // toggle set immediately
-            expect(screen.getByLabelText("Enable guest access").getAttribute("aria-checked")).toBe("false");
+            expect(screen.getByLabelText("Enable guest access")).not.toBeChecked();
 
             await flushPromises();
             expect(client.sendStateEvent).toHaveBeenCalled();
             expect(logger.error).toHaveBeenCalledWith("oups");
 
             // toggle reset to old value
-            expect(screen.getByLabelText("Enable guest access").getAttribute("aria-checked")).toBe("true");
+            expect(screen.getByLabelText("Enable guest access")).toBeChecked();
         });
     });
 
@@ -305,7 +388,7 @@ describe("<SecurityRoomSettingsTab />", () => {
 
             await waitFor(() => expect(screen.getByLabelText("Encrypted")).toBeChecked());
             // can't disable encryption once enabled
-            expect(screen.getByLabelText("Encrypted").getAttribute("aria-disabled")).toEqual("true");
+            expect(screen.getByLabelText("Encrypted")).toBeDisabled();
         });
 
         it("asks users to confirm when setting room to encrypted", async () => {
@@ -412,7 +495,7 @@ describe("<SecurityRoomSettingsTab />", () => {
                 getComponent(room);
 
                 await waitFor(() => expect(screen.getByLabelText("Encrypted")).toBeChecked());
-                expect(screen.getByLabelText("Encrypted").getAttribute("aria-disabled")).toEqual("true");
+                expect(screen.getByLabelText("Encrypted")).toBeDisabled();
                 expect(screen.getByText("Once enabled, encryption cannot be disabled.")).toBeInTheDocument();
             });
 
@@ -422,7 +505,7 @@ describe("<SecurityRoomSettingsTab />", () => {
                 getComponent(room);
 
                 await waitFor(() => expect(screen.getByLabelText("Encrypted")).not.toBeChecked());
-                expect(screen.getByLabelText("Encrypted").getAttribute("aria-disabled")).toEqual("true");
+                expect(screen.getByLabelText("Encrypted")).toBeDisabled();
                 expect(screen.queryByText("Once enabled, encryption cannot be disabled.")).not.toBeInTheDocument();
                 expect(screen.getByText("Your server requires encryption to be disabled.")).toBeInTheDocument();
             });

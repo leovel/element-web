@@ -1,4 +1,5 @@
 /*
+Copyright 2025 Element Creations Ltd.
 Copyright 2024 New Vector Ltd.
 Copyright 2022 The Matrix.org Foundation C.I.C.
 
@@ -7,19 +8,33 @@ Please see LICENSE files in the repository root for full details.
 */
 
 import { mocked, type Mocked } from "jest-mock";
-import { type MatrixClient, type Device, Preset, RoomType } from "matrix-js-sdk/src/matrix";
+import {
+    type MatrixClient,
+    type Device,
+    Preset,
+    RoomType,
+    JoinRule,
+    RoomVersionStability,
+} from "matrix-js-sdk/src/matrix";
 import { type CryptoApi } from "matrix-js-sdk/src/crypto-api";
 import { MatrixRTCSession } from "matrix-js-sdk/src/matrixrtc";
 
-import { stubClient, setupAsyncStoreWithClient, mockPlatformPeg, getMockClientWithEventEmitter } from "../test-utils";
+import {
+    stubClient,
+    setupAsyncStoreWithClient,
+    mockPlatformPeg,
+    getMockClientWithEventEmitter,
+    mkRoom,
+} from "../test-utils";
 import { MatrixClientPeg } from "../../src/MatrixClientPeg";
 import WidgetStore from "../../src/stores/WidgetStore";
 import WidgetUtils from "../../src/utils/WidgetUtils";
 import { JitsiCall, ElementCall } from "../../src/models/Call";
 import createRoom, { checkUserIsAllowedToChangeEncryption, canEncryptToAllUsers } from "../../src/createRoom";
 import SettingsStore from "../../src/settings/SettingsStore";
-import { ElementCallEventType, ElementCallMemberEventType } from "../../src/call-types";
+import { ElementCallMemberEventType } from "../../src/call-types";
 import DMRoomMap from "../../src/utils/DMRoomMap";
+import { PreferredRoomVersions } from "../../src/utils/PreferredRoomVersions";
 
 describe("createRoom", () => {
     mockPlatformPeg();
@@ -33,19 +48,82 @@ describe("createRoom", () => {
 
     afterEach(() => jest.clearAllMocks());
 
+    it("creates a private room", async () => {
+        await createRoom(client, { createOpts: { preset: Preset.PrivateChat } });
+
+        expect(client.createRoom).toHaveBeenCalledWith({
+            preset: "private_chat",
+            visibility: "private",
+            initial_state: [{ state_key: "", type: "m.room.guest_access", content: { guest_access: "can_join" } }],
+        });
+    });
+
+    it("creates a private room in a space", async () => {
+        const roomId = await createRoom(client, { roomType: RoomType.Space });
+        const parentSpace = client.getRoom(roomId!)!;
+        client.createRoom.mockClear();
+
+        await createRoom(client, { parentSpace, createOpts: { preset: Preset.PrivateChat } });
+
+        expect(client.createRoom).toHaveBeenCalledWith({
+            preset: "private_chat",
+            visibility: "private",
+            initial_state: [
+                { state_key: "", type: "m.room.guest_access", content: { guest_access: "can_join" } },
+                { type: "m.space.parent", state_key: parentSpace.roomId, content: { canonical: true, via: [] } },
+            ],
+        });
+    });
+
+    it("creates a public room", async () => {
+        await createRoom(client, { createOpts: { preset: Preset.PublicChat } });
+
+        expect(client.createRoom).toHaveBeenCalledWith({
+            preset: "public_chat",
+            visibility: "private",
+            initial_state: [{ state_key: "", type: "m.room.guest_access", content: { guest_access: "can_join" } }],
+        });
+    });
+
+    it("creates a public room with a topic", async () => {
+        await createRoom(client, { createOpts: { preset: Preset.PublicChat }, topic: "My topic" });
+
+        expect(client.createRoom).toHaveBeenCalledWith({
+            preset: "public_chat",
+            visibility: "private",
+            topic: "My topic",
+            initial_state: [{ state_key: "", type: "m.room.guest_access", content: { guest_access: "can_join" } }],
+        });
+    });
+
+    it("creates a public room in a space", async () => {
+        const roomId = await createRoom(client, { roomType: RoomType.Space });
+        const parentSpace = client.getRoom(roomId!)!;
+        client.createRoom.mockClear();
+
+        await createRoom(client, { parentSpace, createOpts: { preset: Preset.PublicChat } });
+
+        expect(client.createRoom).toHaveBeenCalledWith({
+            preset: "public_chat",
+            visibility: "private",
+            initial_state: [
+                { state_key: "", type: "m.room.guest_access", content: { guest_access: "can_join" } },
+                { type: "m.space.parent", state_key: parentSpace.roomId, content: { canonical: true, via: [] } },
+            ],
+        });
+    });
+
     it("sets up Jitsi video rooms correctly", async () => {
         setupAsyncStoreWithClient(WidgetStore.instance, client);
         jest.spyOn(WidgetUtils, "waitForRoomWidget").mockResolvedValue();
         const createCallSpy = jest.spyOn(JitsiCall, "create");
 
-        const userId = client.getUserId()!;
-        const roomId = await createRoom(client, { roomType: RoomType.ElementVideo });
+        await createRoom(client, { roomType: RoomType.ElementVideo });
 
         const [
             [
                 {
                     power_level_content_override: {
-                        users: { [userId]: userPower },
                         events: {
                             "im.vector.modular.widgets": widgetPower,
                             [JitsiCall.MEMBER_EVENT_TYPE]: callMemberPower,
@@ -55,44 +133,30 @@ describe("createRoom", () => {
             ],
         ] = client.createRoom.mock.calls as any; // no good type
 
-        // We should have had enough power to be able to set up the widget
-        expect(userPower).toBeGreaterThanOrEqual(widgetPower);
         // and should have actually set it up
         expect(createCallSpy).toHaveBeenCalled();
 
         // All members should be able to update their connected devices
         expect(callMemberPower).toEqual(0);
         // widget should be immutable for admins
-        expect(widgetPower).toBeGreaterThan(100);
-        // and we should have been reset back to admin
-        expect(client.setPowerLevel).toHaveBeenCalledWith(roomId, userId, 100);
+        expect(widgetPower).toEqual(100);
     });
 
     it("sets up Element video rooms correctly", async () => {
-        const userId = client.getUserId()!;
         const createCallSpy = jest.spyOn(ElementCall, "create");
         const callMembershipSpy = jest.spyOn(MatrixRTCSession, "callMembershipsForRoom");
         callMembershipSpy.mockReturnValue([]);
 
-        const roomId = await createRoom(client, { roomType: RoomType.UnstableCall });
+        await createRoom(client, { roomType: RoomType.UnstableCall });
 
-        const userPower = client.createRoom.mock.calls[0][0].power_level_content_override?.users?.[userId];
-        const callPower =
-            client.createRoom.mock.calls[0][0].power_level_content_override?.events?.[ElementCallEventType.name];
         const callMemberPower =
             client.createRoom.mock.calls[0][0].power_level_content_override?.events?.[ElementCallMemberEventType.name];
 
-        // We should have had enough power to be able to set up the call
-        expect(userPower).toBeGreaterThanOrEqual(callPower!);
         // and should have actually set it up
         expect(createCallSpy).toHaveBeenCalled();
 
         // All members should be able to update their connected devices
         expect(callMemberPower).toEqual(0);
-        // call should be immutable for admins
-        expect(callPower).toBeGreaterThan(100);
-        // and we should have been reset back to admin
-        expect(client.setPowerLevel).toHaveBeenCalledWith(roomId, userId, 100);
     });
 
     it("doesn't create calls in non-video-rooms", async () => {
@@ -112,12 +176,9 @@ describe("createRoom", () => {
 
         await createRoom(client, {});
 
-        const callPower =
-            client.createRoom.mock.calls[0][0].power_level_content_override?.events?.[ElementCallEventType.name];
         const callMemberPower =
             client.createRoom.mock.calls[0][0].power_level_content_override?.events?.[ElementCallMemberEventType.name];
 
-        expect(callPower).toBe(100);
         expect(callMemberPower).toBe(0);
     });
 
@@ -146,6 +207,80 @@ describe("createRoom", () => {
                 invite: expect.any(Array),
             }),
         );
+    });
+
+    describe("room versions", () => {
+        afterEach(() => {
+            jest.clearAllMocks();
+        });
+        it("should use the correct room version for knocking when default does not support it", async () => {
+            client.getCapabilities.mockResolvedValue({
+                "m.room_versions": {
+                    default: "1",
+                    available: {
+                        [PreferredRoomVersions.KnockRooms]: RoomVersionStability.Stable,
+                        "1": RoomVersionStability.Stable,
+                    },
+                },
+            });
+            await createRoom(client, { joinRule: JoinRule.Knock });
+            expect(client.createRoom).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    room_version: PreferredRoomVersions.KnockRooms,
+                }),
+            );
+        });
+        it("should use the default room version for knocking when default supports it", async () => {
+            client.getCapabilities.mockResolvedValue({
+                "m.room_versions": {
+                    default: "12",
+                    available: {
+                        [PreferredRoomVersions.KnockRooms]: RoomVersionStability.Stable,
+                        "12": RoomVersionStability.Stable,
+                    },
+                },
+            });
+            await createRoom(client, { joinRule: JoinRule.Knock });
+            expect(client.createRoom).toHaveBeenCalledWith(
+                expect.not.objectContaining({
+                    room_version: expect.anything(),
+                }),
+            );
+        });
+        it("should use the correct room version for restricted join rules when default does not support it", async () => {
+            client.getCapabilities.mockResolvedValue({
+                "m.room_versions": {
+                    default: "1",
+                    available: {
+                        [PreferredRoomVersions.RestrictedRooms]: RoomVersionStability.Stable,
+                        "1": RoomVersionStability.Stable,
+                    },
+                },
+            });
+            await createRoom(client, { parentSpace: mkRoom(client, "!parent"), joinRule: JoinRule.Restricted });
+            expect(client.createRoom).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    room_version: PreferredRoomVersions.RestrictedRooms,
+                }),
+            );
+        });
+        it("should use the default room version for restricted join rules when default supports it", async () => {
+            client.getCapabilities.mockResolvedValue({
+                "m.room_versions": {
+                    default: "12",
+                    available: {
+                        [PreferredRoomVersions.RestrictedRooms]: RoomVersionStability.Stable,
+                        "12": RoomVersionStability.Stable,
+                    },
+                },
+            });
+            await createRoom(client, { parentSpace: mkRoom(client, "!parent"), joinRule: JoinRule.Restricted });
+            expect(client.createRoom).toHaveBeenCalledWith(
+                expect.not.objectContaining({
+                    room_version: expect.anything(),
+                }),
+            );
+        });
     });
 });
 

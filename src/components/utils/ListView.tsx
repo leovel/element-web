@@ -42,7 +42,7 @@ export interface IListViewProps<Item, Context>
         index: number,
         item: Item,
         context: ListContext<Context>,
-        onFocus: (e: React.FocusEvent) => void,
+        onFocus: (item: Item, e: React.FocusEvent) => void,
     ) => JSX.Element;
 
     /**
@@ -133,13 +133,13 @@ export function ListView<Item, Context = any>(props: IListViewProps<Item, Contex
             }
             if (items[clampedIndex]) {
                 const key = getItemKey(items[clampedIndex]);
-                setTabIndexKey(key);
                 isScrollingToItem.current = true;
                 virtuosoHandleRef.current?.scrollIntoView({
                     index: clampedIndex,
                     align: align,
                     behavior: "auto",
                     done: () => {
+                        setTabIndexKey(key);
                         isScrollingToItem.current = false;
                     },
                 });
@@ -230,19 +230,26 @@ export function ListView<Item, Context = any>(props: IListViewProps<Item, Contex
         virtuosoDomRef.current = element;
     }, []);
 
-    const getItemComponentInternal = useCallback(
-        (index: number, item: Item, context: ListContext<Context>): JSX.Element => {
-            const onFocus = (e: React.FocusEvent): void => {
-                // If one of the item components has been focused directly, set the focused and tabIndex state
-                // and stop propagation so the ListViews onFocus doesn't also handle it.
-                const key = getItemKey(item);
-                setIsFocused(true);
-                setTabIndexKey(key);
-                e.stopPropagation();
-            };
-            return getItemComponent(index, item, context, onFocus);
+    /**
+     * Focus handler passed to each item component.
+     * Don't declare inside getItemComponent to avoid re-creating on each render.
+     */
+    const onFocusForGetItemComponent = useCallback(
+        (item: Item, e: React.FocusEvent) => {
+            // If one of the item components has been focused directly, set the focused and tabIndex state
+            // and stop propagation so the ListViews onFocus doesn't also handle it.
+            const key = getItemKey(item);
+            setIsFocused(true);
+            setTabIndexKey(key);
+            e.stopPropagation();
         },
-        [getItemComponent, getItemKey],
+        [getItemKey],
+    );
+
+    const getItemComponentInternal = useCallback(
+        (index: number, item: Item, context: ListContext<Context>): JSX.Element =>
+            getItemComponent(index, item, context, onFocusForGetItemComponent),
+        [getItemComponent, onFocusForGetItemComponent],
     );
     /**
      * Handles focus events on the list.
@@ -285,7 +292,10 @@ export function ListView<Item, Context = any>(props: IListViewProps<Item, Contex
 
     return (
         <Virtuoso
-            tabIndex={props.tabIndex || undefined} // We don't need to focus the container, so leave it undefined by default
+            // note that either the container of direct children must be focusable to be axe
+            // compliant, so we leave tabIndex as the default so the container can be focused
+            // (virtuoso wraps the children inside another couple of elements so setting it
+            // on those doesn't seem to work, unfortunately)
             ref={virtuosoHandleRef}
             scrollerRef={scrollerRef}
             onKeyDown={keyDownCallback}

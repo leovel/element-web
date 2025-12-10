@@ -61,11 +61,11 @@ $left-gutter: 64px;
     }
 
     .mx_EventTile_receiptSent::before {
-        mask-image: url("$(res)/img/element-icons/circle-sent.svg");
+        mask-image: url("@vector-im/compound-design-tokens/icons/check-circle.svg");
     }
 
     .mx_EventTile_receiptSending::before {
-        mask-image: url("$(res)/img/element-icons/circle-sending.svg");
+        mask-image: url("@vector-im/compound-design-tokens/icons/circle.svg");
     }
 
     .mx_EventTile_content {
@@ -200,10 +200,6 @@ $left-gutter: 64px;
                Replaces margin-top: -6px. This interacts better with a read
                marker being in between. Content overflows. */
             height: 1px;
-
-            a {
-                text-decoration: none;
-            }
         }
 
         &.mx_EventTile_highlight,
@@ -273,9 +269,9 @@ $left-gutter: 64px;
         align-items: flex-start;
         padding-top: 0;
 
-        > a {
-            text-decoration: none; /* timestamps are links which shouldn't be underlined */
+        .mx_MessageTimestamp {
             min-width: var(--MessageTimestamp-width); /* ensure space for EventTile without timestamp */
+            text-align: right;
         }
 
         > * {
@@ -300,13 +296,11 @@ $left-gutter: 64px;
             display: flex;
             align-items: center;
 
-            /* Need to use important to override the js provided height and width values. */
+            /* Need to use important to override the js calculated values. */
             > .mx_BaseAvatar,
             > .mx_BaseAvatar > * {
-                height: $font-14px !important;
-                width: $font-14px !important;
                 font-size: $font-10px !important;
-                line-height: $font-15px !important;
+                line-height: calc($font-15px - 2px) !important;
             }
         }
 
@@ -401,10 +395,6 @@ $left-gutter: 64px;
 
         .mx_ReplyChain {
             margin: 0;
-        }
-
-        .mx_MessageTimestamp {
-            text-align: right;
         }
 
         .mx_EditMessageComposer_buttons {
@@ -859,17 +849,17 @@ $left-gutter: 64px;
     }
 
     &.mx_EventTile_e2eIcon_warning::after {
-        mask-image: url("$(res)/img/e2e/warning.svg"); /* (!) in a shield */
+        mask-image: url("@vector-im/compound-design-tokens/icons/error-solid.svg");
         background-color: $e2e-warning-color; /* red */
     }
 
     &.mx_EventTile_e2eIcon_normal::after {
-        mask-image: url("$(res)/img/e2e/normal.svg"); /* regular shield */
+        mask-image: url("@vector-im/compound-design-tokens/icons/lock-solid.svg");
         background-color: var(--cpd-color-icon-tertiary); /* grey */
     }
 
     &.mx_EventTile_e2eIcon_decryption_failure::after {
-        mask-image: url("$(res)/img/e2e/decryption-failure.svg"); /* key in a circle */
+        mask-image: url("@vector-im/compound-design-tokens/icons/error-solid.svg");
         background-color: var(--cpd-color-icon-tertiary);
     }
 }
@@ -1174,11 +1164,11 @@ $left-gutter: 64px;
         &.mx_EventTile_info {
             .mx_EventTile_avatar {
                 position: absolute;
-                top: 1.5px; /* Align with hidden event content */
-                margin-top: 0;
+                /* Align with hidden event content */
+                top: 50%;
+                transform: translateY(-50%);
+                margin-top: -2px;
                 margin-bottom: 0;
-                width: 14px; /* avatar img size */
-                height: 14px; /* avatar img size */
             }
 
             &.mx_EventTile_selected .mx_EventTile_line,
